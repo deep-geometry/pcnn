@@ -14,7 +14,7 @@ import argparse
 
 np.random.seed(0)
 from pointcloud_conv_net import Network
-from provider import ClassificationProvider
+from provider import SebastianProvider
 
 
 def get_learning_rate(batch):
@@ -37,18 +37,16 @@ def get_bn_decay(batch):
     bn_decay = tf.minimum(BN_DECAY_CLIP, 1 - bn_momentum)
     return bn_decay
 
-def train():
 
+def train():
     TRAIN_FILES = provider.getTrainDataFiles()
     TEST_FILES = provider.getTestDataFiles()
 
     with tf.Graph().as_default():
         tf.set_random_seed(0)
         with tf.device('/gpu:' + str(GPU_INDEX)):
-
-
             pointclouds_pl = tf.placeholder(tf.float32, shape=(BATCH_SIZE,NUM_POINT, 3))
-            labels_pl = tf.placeholder(tf.int32, shape=(BATCH_SIZE))
+            labels_pl = tf.placeholder(tf.float32, shape=(BATCH_SIZE, 3))
             is_training_pl = tf.placeholder(tf.bool, shape=())
             is_evaluate_pl = tf.placeholder(tf.bool, shape=())
 
@@ -62,12 +60,12 @@ def train():
             #pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, bn_decay=bn_decay)
             network = Network(conf.get_config('network'))
             pred = network.build_network(pointclouds_pl,is_training_pl,is_evaluate_pl,bn_decay)
-            loss = network.get_loss(pred, labels_pl)
+            loss = network.cos_loss(pred, labels_pl)
             tf.summary.scalar('loss', loss)
 
-            correct = tf.equal(tf.argmax(pred, 1), tf.to_int64(labels_pl))
-            accuracy = tf.reduce_sum(tf.cast(correct, tf.float32)) / float(BATCH_SIZE)
-            tf.summary.scalar('accuracy', accuracy)
+            # correct = tf.equal(tf.argmax(pred, 1), tf.to_int64(labels_pl))
+            # accuracy = tf.reduce_sum(tf.cast(correct, tf.float32)) / float(BATCH_SIZE)
+            # tf.summary.scalar('accuracy', accuracy)
 
             # Get training operator
             learning_rate = get_learning_rate(batch)
@@ -132,12 +130,13 @@ def train():
             train_file_idxs = np.arange(0, len(TRAIN_FILES))
             np.random.shuffle(train_file_idxs)
 
+            provider.reshuffle()
 
             for fn in range(len(TRAIN_FILES)):
                 log_string('----' + str(fn) + '-----')
-                current_data, current_label = provider.loadDataFile(TRAIN_FILES[train_file_idxs[fn]])
+                current_data, current_label = provider.loadDataFile(is_train=True)
 
-                current_data = current_data[:, : , :]
+                current_data = current_data[:, :, :]
                 current_data, current_label, idx = provider.shuffle_data(current_data, np.squeeze(current_label))
 
                 current_label = np.squeeze(current_label)
@@ -145,27 +144,18 @@ def train():
                 file_size = current_data.shape[0]
                 num_batches = file_size // BATCH_SIZE
 
-                total_correct = 0
+                # total_correct = 0
                 total_seen = 0
                 loss_sum = 0
 
-                total_correct_last = 0.
                 total_seen_last = 0.
                 for batch_idx in range(num_batches):
                     #print ("batch_idx : {0}".format(batch_idx))
                     start_idx = batch_idx * BATCH_SIZE
                     end_idx = (batch_idx + 1) * BATCH_SIZE
 
-                    if (conf.get_bool('network.with_rotations')):
-                        rotated_data = provider.rotate_point_cloud(current_data[start_idx:end_idx, np.random.choice(
-                            np.arange(conf.get_int('no_points_sample')), NUM_POINT, False), :])
-                        augmented_data = provider.translate_point_cloud(rotated_data)
-
-                    else:
-                        augmented_data = provider.translate_point_cloud(current_data[start_idx:end_idx, np.random.choice(np.arange(conf.get_int('no_points_sample')),NUM_POINT,False), :])
-
-                    feed_dict = {ops['pointclouds_pl']: augmented_data,
-                                 ops['labels_pl']: current_label[start_idx:end_idx],
+                    feed_dict = {ops['pointclouds_pl']: current_data[start_idx:end_idx, :, :],
+                                 ops['labels_pl']: current_label[start_idx:end_idx, :],
                                  ops['is_training_pl']: is_training,
                                  ops['is_evaluate_pl']: is_evaluate}
 
@@ -177,88 +167,89 @@ def train():
                     pred_val = np.argmax(pred_val, 1)
                     correct = np.sum(pred_val == current_label[start_idx:end_idx])
 
-                    total_correct += correct
+                    # total_correct += correct
                     total_seen += BATCH_SIZE
 
                     if (batch_idx % 10 == 1):
-                        print ('accuracy : {0}'.format(total_correct_last / total_seen_last))
+                        print ('total loss so far : {0}'.format(loss_sum))
                         total_correct_last = 0.0
                         total_seen_last = 0.0
 
-                    total_correct_last += correct
                     total_seen_last += BATCH_SIZE
 
                     loss_sum += loss_val
 
-
                 log_string('mean loss: %f' % (loss_sum / float(num_batches)))
-                log_string('accuracy: %f' % (total_correct / float(total_seen)))
+
             return step
 
         def eval_one_epoch(sess, ops, epoch_index):
             global total_paramers
-
+            """ ops: dict mapping from string to tf ops """
             is_training = False
-            is_evaluate = False
-            total_correct = 0
-            total_seen = 0
-            loss_sum = 0
-            total_seen_class = [0 for _ in range(NUM_CLASSES)]
-            total_correct_class = [0 for _ in range(NUM_CLASSES)]
-            confusion_matrix = np.zeros((NUM_CLASSES,NUM_CLASSES))
+            is_evaluate = True
+
+            # Shuffle train files
+            train_file_idxs = np.arange(0, len(TEST_FILES))
+            np.random.shuffle(train_file_idxs)
+
+            provider.reshuffle()
 
             for fn in range(len(TEST_FILES)):
                 log_string('----' + str(fn) + '-----')
-                current_data, current_label = provider.loadDataFile(TEST_FILES[fn])
-                current_data = current_data[:, 0:NUM_POINT, :]
+                current_data, current_label = provider.loadDataFile(is_train=False)
+
+                current_data = current_data[:, :, :]
+                current_data, current_label, idx = provider.shuffle_data(current_data, np.squeeze(current_label))
+
                 current_label = np.squeeze(current_label)
 
                 file_size = current_data.shape[0]
-                #num_batches = file_size // BATCH_SIZE
-                num_batches = int(math.ceil(file_size * 1.0 / BATCH_SIZE))
+                num_batches = file_size // BATCH_SIZE
+
+                # total_correct = 0
+                total_seen = 0
+                loss_sum = 0
+
+                total_seen_last = 0.
                 for batch_idx in range(num_batches):
+                    #print ("batch_idx : {0}".format(batch_idx))
                     start_idx = batch_idx * BATCH_SIZE
                     end_idx = (batch_idx + 1) * BATCH_SIZE
-                    cur_batch_size = current_data[start_idx:end_idx].shape[0]
 
-                    if (cur_batch_size < BATCH_SIZE):
-                        current_data_feed = np.concatenate([current_data[start_idx:end_idx, :, :], np.zeros((BATCH_SIZE - cur_batch_size, NUM_POINT, 3))], 0)
-                        current_label_feed = np.concatenate(
-                            [current_label[start_idx:end_idx], np.ones((BATCH_SIZE - cur_batch_size))],
-                            0)
-                    else:
-                        current_label_feed = current_label[start_idx:end_idx]
-                        current_data_feed = current_data[start_idx:end_idx, :, :]
-
-                    feed_dict = {ops['pointclouds_pl']: current_data_feed,
-                                 ops['labels_pl']: current_label_feed,
+                    feed_dict = {ops['pointclouds_pl']: current_data[start_idx:end_idx, :, :],
+                                 ops['labels_pl']: current_label[start_idx:end_idx, :],
                                  ops['is_training_pl']: is_training,
                                  ops['is_evaluate_pl']: is_evaluate}
-                    loss_val, pred_val = sess.run([ops['loss'], ops['pred']], feed_dict=feed_dict)
 
-                    pred_val = np.argmax(pred_val[:cur_batch_size], 1)
+                    summary, step, _, loss_val, pred_val = sess.run([ops['merged'], ops['step'],
+                                                                     ops['train_op'], ops['loss'], ops['pred']],
+                                                                    feed_dict=feed_dict)
+
+                    train_writer.add_summary(summary, step)
+                    pred_val = np.argmax(pred_val, 1)
                     correct = np.sum(pred_val == current_label[start_idx:end_idx])
-                    total_correct += correct
-                    total_seen += cur_batch_size
-                    loss_sum += (loss_val * BATCH_SIZE)
-                    for i in range(start_idx, min(end_idx,file_size)):
-                        l = current_label[i]
-                        total_seen_class[l] += 1
-                        total_correct_class[l] += (pred_val[i - start_idx] == l)
 
-            log_string('eval mean loss: %f' % (loss_sum / float(total_seen)))
-            log_string('eval accuracy: %f' % (total_correct / float(total_seen)))
-            log_string('eval avg class acc: %f' % (
-            np.mean(np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float))))
+                    # total_correct += correct
+                    total_seen += BATCH_SIZE
 
-            return np.asscalar(total_correct / float(total_seen))
+                    if (batch_idx % 10 == 1):
+                        print ('total loss so far : {0}'.format(loss_sum))
+                        total_correct_last = 0.0
+                        total_seen_last = 0.0
+
+                    total_seen_last += BATCH_SIZE
+
+                    loss_sum += loss_val
+
+                log_string('Test: mean loss: %f' % (loss_sum / float(num_batches)))
 
         for epoch in range(MAX_EPOCH):
             log_string('**** EPOCH %03d ****' % (epoch))
             sys.stdout.flush()
 
             train_one_epoch(sess, ops, train_writer,epoch)
-            acc = eval_one_epoch(sess, ops, epoch)
+            eval_one_epoch(sess, ops, epoch)
 
             # Save the variables to disk.
             if (epoch % 50 == 0 ):
@@ -274,9 +265,11 @@ def log_string(out_str):
     LOG_FOUT.flush()
     print(out_str)
 
+
 def mkdir_ifnotexists(directory):
     if not os.path.exists(directory):
         os.mkdir(directory)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -284,6 +277,8 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU 0]')
     parser.add_argument('--config', type=str, default='confs/pointconv.conf', help='Config to use [default: pointconv]')
     parser.add_argument('--hypothesis', type=str, default='', help='Document experiment hypothesis')
+    parser.add_argument('--testdir', type=str)
+    parser.add_argument('--traindir', type=str)
     FLAGS = parser.parse_args()
 
     conf = ConfigFactory.parse_file('{0}'.format(FLAGS.config))
@@ -312,7 +307,6 @@ if __name__ == '__main__':
     mkdir_ifnotexists('./exp_results/{0}/{1}'.format(expirment_name,hostname))
     mkdir_ifnotexists('./exp_results/{0}/{1}/{2}'.format(expirment_name, hostname,GPU_INDEX))
 
-
     os.mkdir(LOG_DIR)
 
     mkdir_ifnotexists(os.path.join(LOG_DIR, 'layers'))
@@ -333,11 +327,11 @@ if __name__ == '__main__':
 
     os.environ["CUDA_VISIBLE_DEVICES"] = '{0}'.format(GPU_INDEX)
 
-    provider = ClassificationProvider()
-    NUM_CLASSES = 40
-
     NUM_POINT = conf.get_list('network.pool_sizes_sigma')[0][0]
     print ("num point : {0}".format(NUM_POINT))
+
+    provider = SebastianProvider(traindir=FLAGS.traindir, testdir=FLAGS.testdir, batch_size=BATCH_SIZE, points_per_patch=NUM_POINT)
+    NUM_CLASSES = 40
 
     log_string("experiment name : {0}".format(expirment_name))
     train()

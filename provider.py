@@ -4,7 +4,10 @@ downladed from: https://github.com/charlesq34/pointnet
 import os
 import sys
 import numpy as np
+import scipy as sp
+import scipy.spatial
 import h5py
+import point_sampling_utils as psu
 from abc import ABCMeta,abstractmethod
 
 
@@ -144,3 +147,95 @@ class ClassificationProvider(Provider):
         seg = f['pid'][:]
         return (data, label, seg)
 
+
+class SebastianProvider(object):
+    def __init__(self, traindir, testdir, batch_size, points_per_patch, normalize_data=True):
+        self.traindir = traindir
+        self.testdir = testdir
+
+        self.train_file_list = list(os.listdir(traindir))
+        self.num_train_patches = len(self.train_file_list)
+        print(self.num_train_patches)
+
+        self.test_file_list = list(os.listdir(testdir))
+        self.num_test_patches = len(self.test_file_list)
+
+        self.points_per_patch = points_per_patch
+        self.batch_size = batch_size
+
+        self.access_indices = np.random.permutation(self.num_train_patches)
+        self.normalize_data = normalize_data
+
+        self.train_points, self.train_normals = self.gen_data(self.traindir)
+        self.test_points, self.test_normals = self.gen_data(self.testdir)
+
+    def gen_data(self, directory):
+        file_list = list(os.listdir(directory))
+        num_patches = len(file_list)
+        points = np.zeros([num_patches, self.points_per_patch, 3], dtype=np.float32)
+        normals = np.zeros([num_patches, 3], np.float32)
+        print("Generating %d patches" % num_patches)
+        for shape_ind, shape_name in enumerate(file_list):
+            # print('getting information for shape %s' % shape_name)
+
+            # load from text file and save in more efficient numpy format
+            point_filename = os.path.join(directory, shape_name)
+            v, _, n = psu.read_obj(point_filename)
+            pts = v
+
+            scale_factor = 1.0
+            min_translate_factor = np.zeros(3)
+
+            if self.normalize_data:
+                min_translate_factor = np.min(pts, axis=0)
+                pts -= min_translate_factor
+                scale_factor = 1.0 / np.max(pts)
+                pts *= scale_factor
+
+            kdtree = sp.spatial.KDTree(pts)
+            centroid = np.mean(pts, axis=0)
+            _, i = kdtree.query(centroid)
+            center_vertex = pts[i, :].astype(np.float32)
+            pts -= center_vertex
+
+            points[shape_ind, :, :] = pts.astype(np.float32)
+            normals[shape_ind, :] = n[i, :].astype(np.float32)
+
+            # shape = {'p': pts.astype(np.float32), 'n': n.astype(np.float32),
+            #          'ctr': center_vertex, 'ctr_i': i,
+            #          'scale_factor': scale_factor,
+            #          'min_translate_factor': min_translate_factor }
+            # self.shapes.append(shape)
+        return points, normals
+
+    def reshuffle(self):
+        self.access_indices = np.random.permutation(self.num_train_patches)
+
+    @property
+    def num_batches(self):
+        return int(np.ceil(self.num_train_patches / self.batch_size))
+
+    def getTrainDataFiles(self):
+        return ["dummy"]
+
+    def getTestDataFiles(self):
+        return ["dummy"]
+
+    def loadDataFile(self, is_train=True):
+        if is_train:
+            return self.train_points[self.access_indices, :, :], \
+                   self.train_normals[self.access_indices, :]
+        else:
+            return self.test_points, self.test_normals
+
+    def shuffle_data(self, data, labels):
+        """ Shuffle data and labels.
+            Input:
+              data: B,N,... numpy array
+              label: B,... numpy array
+            Return:
+              shuffled data, label and shuffle indices
+        """
+        idx = np.arange(len(labels))
+        np.random.shuffle(idx)
+        return data[idx, ...], labels[idx], idx

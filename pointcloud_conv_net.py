@@ -60,13 +60,22 @@ class Network:
                                       scope='fc2', bn_decay=bn_decay)
         network = tf_util.dropout(network, keep_prob=self.conf.get_float('dropout.keep_prob'), is_training=is_training,
                                   scope='dp2')
-        network = tf_util.fully_connected(network, 40, activation_fn=None, scope='fc3')
+        network = tf_util.fully_connected(network, 3, activation_fn=None, scope='fc3')
 
         return network
 
     def get_loss(self, pred, label):
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred, labels=label)
         return tf.reduce_mean(loss)
+
+    def cos_loss(self, pred, label):
+        norm_pred = tf.nn.l2_normalize(pred, axis=1)
+        norm_label = tf.nn.l2_normalize(label, axis=1)
+        cos_similarity = tf.reduce_sum(tf.multiply(norm_pred, norm_label), axis=1)
+        sq_cos_similarity = tf.square(cos_similarity)
+        a = tf.constant(1.0, dtype=tf.float32)
+        one_minus_cos_similarity = tf.subtract(a, sq_cos_similarity)
+        return tf.reduce_mean(one_minus_cos_similarity)
 
     def tf_cov(self, x):
         x = tf.transpose(tf.gather(tf.transpose(x, [2, 1, 0]), [0, 2]), [2, 1, 0])
