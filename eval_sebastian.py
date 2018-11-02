@@ -136,8 +136,8 @@ def eval_one_epoch(sess, ops, num_votes=1):
             for i in range(0, BATCH_SIZE):
                 file_name = provider.test_file_list[start_idx+i]
                 center_idx = provider.test_ctrs[start_idx+i]
-                expected_normal = provider.test_normals[start_idx+i]
-                predicted_normal = np.array(pred_val[i])
+                expected_normal = provider.test_normals[start_idx+i].astype(float)
+                predicted_normal = np.array(pred_val[i]).astype(float)
 
                 # infodict = {
                 #     'filename': filenames[i],
