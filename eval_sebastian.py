@@ -26,7 +26,8 @@ parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU
 parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 1]')
 parser.add_argument('--model_path', default='epoch_250/model.ckpt',
                     help='model checkpoint file path [default: log/model.ckpt]')
-parser.add_argument('--dataset-path', default="", help="Directory of the dataset")
+parser.add_argument('--traindir', default="", help="Directory of the train dataset")
+parser.add_argument('--testdir', default="", help="Directory of the test dataset")
 parser.add_argument('--dump_dir', default='dump', help='dump folder path [dump]')
 parser.add_argument('--config', type=str, default='pointconv.conf',
                     help='Config to use [default: pointconv]')
@@ -45,9 +46,7 @@ LOG_FOUT.write(str(FLAGS) + '\n')
 
 HOSTNAME = socket.gethostname()
 
-traindir = os.path.join(FLAGS.dataset_path, "train")
-testdir = os.path.join(FLAGS.dataset_path, "test")
-provider = SebastianProvider(traindir=traindir, testdir=testdir,
+provider = SebastianProvider(traindir=FLAGS.traindir, testdir=FLAGS.testdir,
                              batch_size=BATCH_SIZE, points_per_patch=NUM_POINT)
 TRAIN_FILES = provider.getTrainDataFiles()
 TEST_FILES = provider.getTestDataFiles()
