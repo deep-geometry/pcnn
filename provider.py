@@ -153,6 +153,10 @@ class SebastianProvider(object):
         self.traindir = traindir
         self.testdir = testdir
 
+        self.points_per_patch = points_per_patch
+        self.batch_size = batch_size
+        self.normalize_data = normalize_data
+
         if traindir is not None:
             self.train_file_list = list(os.listdir(traindir))
             self.num_train_patches = len(self.train_file_list)
@@ -163,10 +167,6 @@ class SebastianProvider(object):
             self.test_file_list = list(os.listdir(testdir))
             self.num_test_patches = len(self.test_file_list)
             self.test_points, self.test_normals, self.test_ctrs = self.gen_data(self.testdir)
-
-        self.points_per_patch = points_per_patch
-        self.batch_size = batch_size
-        self.normalize_data = normalize_data
 
     def gen_data(self, directory):
         file_list = list(os.listdir(directory))
