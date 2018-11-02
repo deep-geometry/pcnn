@@ -137,8 +137,11 @@ def eval_one_epoch(sess, ops, num_votes=1):
                 file_name = provider.test_file_list[start_idx+i]
                 center_idx = provider.test_ctrs[start_idx+i]
                 expected_normal = provider.test_normals[start_idx+i].astype(float)
+                expected_normal /= np.linalg.norm(expected_normal)
                 predicted_normal = np.array(pred_val[i]).astype(float)
-
+                predicted_normal /= np.linalg.norm(predicted_normal)
+                one_minus_cos_loss = float(1.0 - np.abs(np.dot(expected_normal, predicted_normal))) ** 2
+                print(predicted_normal, expected_normal, one_minus_cos_loss)
                 # infodict = {
                 #     'filename': filenames[i],
                 #     'expected_normal': target_i,
@@ -147,18 +150,16 @@ def eval_one_epoch(sess, ops, num_votes=1):
                 #     'ctr_idx': point_indexes[i],
                 # }
                 #
-                my_loss = float(1.0 - np.abs(np.dot(expected_normal, predicted_normal))) ** 2
+
                 save_dict = {
                     'file_name': file_name,
                     'ctr_idx': int(center_idx),
                     'expected_normal': list(expected_normal),
                     'predicted_normal': list(predicted_normal),
-                    'one_minus_cos_loss': my_loss
+                    'one_minus_cos_loss': one_minus_cos_loss
                 }
 
                 out_data.append(save_dict)
-
-            print(loss_val, pred_val)
 
     with open("res.json", "w") as json_f:
         json_f.write(json.dumps(out_data))
