@@ -71,7 +71,7 @@ def evaluate(num_votes):
         # pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, bn_decay=bn_decay)
         network = Network(conf.get_config('network'))
         pred = network.build_network(pointclouds_pl, is_training_pl,is_evaluate_pl)
-        loss = network.get_loss(pred, labels_pl)
+        loss = network.cos_loss(pred, labels_pl)
 
         # Add ops to save and restore all the variables.
         saver = tf.train.Saver()
