@@ -4,11 +4,10 @@ downladed from: https://github.com/charlesq34/pointnet
 
 import tensorflow as tf
 import numpy as np
-import math
 import argparse
 import socket
 import os
-import sys
+import json
 from pyhocon import ConfigFactory
 from provider import SebastianProvider
 
@@ -46,7 +45,7 @@ LOG_FOUT.write(str(FLAGS) + '\n')
 
 HOSTNAME = socket.gethostname()
 
-provider = SebastianProvider(traindir=FLAGS.traindir, testdir=FLAGS.testdir,
+provider = SebastianProvider(traindir=None, testdir=FLAGS.testdir,
                              batch_size=BATCH_SIZE, points_per_patch=NUM_POINT)
 TRAIN_FILES = provider.getTrainDataFiles()
 TEST_FILES = provider.getTestDataFiles()
@@ -105,7 +104,7 @@ def eval_one_epoch(sess, ops, num_votes=1):
     loss_sum = 0
     out_results = []
 
-    fout = open(os.path.join(DUMP_DIR, 'pred_label.txt'), 'w')
+    out_data = []
 
     for fn in range(len(TEST_FILES)):
         log_string('----' + str(fn) + '----')
@@ -134,7 +133,35 @@ def eval_one_epoch(sess, ops, num_votes=1):
             loss_val, pred_val = sess.run([ops['loss'], ops['pred']],
                                           feed_dict=feed_dict)
 
+            for i in range(0, BATCH_SIZE):
+                file_name = TEST_FILES[start_idx+i]
+                center_idx = provider.test_ctrs[start_idx+i]
+                expected_normal = provider.test_normals[start_idx+i]
+                predicted_normal = np.array(pred_val[i])
+
+                # infodict = {
+                #     'filename': filenames[i],
+                #     'expected_normal': target_i,
+                #     'predicted_normal': predicted_i,
+                #     'one_minus_cos_loss': float(losses[i].data.cpu().numpy()),
+                #     'ctr_idx': point_indexes[i],
+                # }
+                #
+                my_loss = float(1.0 - np.abs(np.dot(expected_normal, predicted_normal))) ** 2
+                save_dict = {
+                    'file_name': file_name,
+                    'ctr_idx': center_idx,
+                    'expected_normal': list(expected_normal),
+                    'predicted_normal': list(predicted_normal),
+                    'one_minus_cos_loss': my_loss
+                }
+
+                out_data.append(save_dict)
+
             print(loss_val, pred_val)
+
+    with open("res.json", "w") as json_f:
+        json_f.write(json.dumps(out_data))
 
 
 if __name__ == '__main__':

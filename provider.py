@@ -153,27 +153,27 @@ class SebastianProvider(object):
         self.traindir = traindir
         self.testdir = testdir
 
-        self.train_file_list = list(os.listdir(traindir))
-        self.num_train_patches = len(self.train_file_list)
-        print(self.num_train_patches)
+        if traindir is not None:
+            self.train_file_list = list(os.listdir(traindir))
+            self.num_train_patches = len(self.train_file_list)
+            self.access_indices = np.random.permutation(self.num_train_patches)
+            self.train_points, self.train_normals, self.train_ctrs = self.gen_data(self.traindir)
 
-        self.test_file_list = list(os.listdir(testdir))
-        self.num_test_patches = len(self.test_file_list)
+        if testdir is not None:
+            self.test_file_list = list(os.listdir(testdir))
+            self.num_test_patches = len(self.test_file_list)
+            self.test_points, self.test_normals, self.test_ctrs = self.gen_data(self.testdir)
 
         self.points_per_patch = points_per_patch
         self.batch_size = batch_size
-
-        self.access_indices = np.random.permutation(self.num_train_patches)
         self.normalize_data = normalize_data
-
-        self.train_points, self.train_normals = self.gen_data(self.traindir)
-        self.test_points, self.test_normals = self.gen_data(self.testdir)
 
     def gen_data(self, directory):
         file_list = list(os.listdir(directory))
         num_patches = len(file_list)
         points = np.zeros([num_patches, self.points_per_patch, 3], dtype=np.float32)
-        normals = np.zeros([num_patches, 3], np.float32)
+        normals = np.zeros([num_patches, 3], dtype=np.float32)
+        center_indexes = np.zeros(num_patches, dtype=np.int32)
         print("Generating %d patches" % num_patches)
         for shape_ind, shape_name in enumerate(file_list):
             # print('getting information for shape %s' % shape_name)
@@ -195,6 +195,7 @@ class SebastianProvider(object):
             kdtree = sp.spatial.KDTree(pts)
             centroid = np.mean(pts, axis=0)
             _, i = kdtree.query(centroid)
+            center_indexes[shape_ind] = i
             center_vertex = pts[i, :].astype(np.float32)
             pts -= center_vertex
 
@@ -206,7 +207,7 @@ class SebastianProvider(object):
             #          'scale_factor': scale_factor,
             #          'min_translate_factor': min_translate_factor }
             # self.shapes.append(shape)
-        return points, normals
+        return points, normals, center_indexes
 
     def reshuffle(self):
         self.access_indices = np.random.permutation(self.num_train_patches)
