@@ -150,7 +150,7 @@ def eval_one_epoch(sess, ops, num_votes=1):
                 my_loss = float(1.0 - np.abs(np.dot(expected_normal, predicted_normal))) ** 2
                 save_dict = {
                     'file_name': file_name,
-                    'ctr_idx': center_idx,
+                    'ctr_idx': int(center_idx),
                     'expected_normal': list(expected_normal),
                     'predicted_normal': list(predicted_normal),
                     'one_minus_cos_loss': my_loss
